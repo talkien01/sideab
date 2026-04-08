@@ -15,10 +15,14 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const loadData = () => {
     setBeneficiaries(storage.getBeneficiaries());
     setPendingDeliveries(storage.getPendingDeliveries());
+    setPendingDocs(storage.getPendingDocuments());
   };
 
+  const [pendingDocs, setPendingDocs] = useState<storage.PendingDocument[]>([]);
+
   const handleSync = async () => {
-    if (pendingDeliveries.length === 0) {
+    const totalPending = pendingDeliveries.length + pendingDocs.length;
+    if (totalPending === 0) {
       alert('No hay registros pendientes para sincronizar.');
       return;
     }
@@ -29,63 +33,51 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       const token = storage.getToken();
       if (!token) throw new Error('No hay sesión activa');
 
-      // Filter: only sync records WITH photos
-      const validDeliveries = pendingDeliveries.filter(d => 
-        d.evidencePhotoCloudUrl && (d.evidencePhotoCloudUrl.startsWith('data:') || d.evidencePhotoCloudUrl.startsWith('http'))
-      );
-
-      if (validDeliveries.length === 0) {
-        alert('No hay registros con fotografía válida para sincronizar. Por favor, captura la evidencia primero.');
-        setSyncing(false);
-        return;
-      }
-
-      if (validDeliveries.length < pendingDeliveries.length) {
-        if (!confirm(`Se detectaron ${pendingDeliveries.length - validDeliveries.length} registros sin fotografía. Solo se sincronizarán los registros completos. ¿Continuar?`)) {
-          setSyncing(false);
-          return;
-        }
-      }
-
-      // Logic for pushing batch
-      setProgress(40);
-      
-      const deliveriesToPush = [];
-      const totalToSync = validDeliveries.length;
-      const syncedIds: string[] = [];
-      
-      for (let i = 0; i < totalToSync; i++) {
-        const delivery = validDeliveries[i];
-        
-        // If there is a local photo (base64/dataURL), upload it first
-        if (delivery.evidencePhotoCloudUrl && delivery.evidencePhotoCloudUrl.startsWith('data:')) {
-          try {
-            // Convert dataURL to File object for upload
+      // 1. Sync Deliveries
+      const syncedDeliveryIds: string[] = [];
+      if (pendingDeliveries.length > 0) {
+        setProgress(20);
+        const deliveriesToPush = [];
+        for (const delivery of pendingDeliveries) {
+          if (delivery.evidencePhotoCloudUrl?.startsWith('data:')) {
             const res = await fetch(delivery.evidencePhotoCloudUrl);
             const blob = await res.blob();
             const file = new File([blob], `evidence-${delivery.beneficiaryFolio}.jpg`, { type: 'image/jpeg' });
-            
             const uploadRes = await api.uploadPhoto(token, file);
-            delivery.evidencePhotoCloudUrl = uploadRes.url; // Update with server URL
-          } catch (e) {
-            console.error("Failed to upload photo for", delivery.beneficiaryFolio, e);
-            continue; // Skip this one if upload fails
+            delivery.evidencePhotoCloudUrl = uploadRes.url;
           }
+          deliveriesToPush.push(delivery);
+          syncedDeliveryIds.push(delivery.id);
         }
-        deliveriesToPush.push(delivery);
-        syncedIds.push(delivery.id);
-        setProgress(40 + Math.floor((i / totalToSync) * 30));
+        await api.pushDeliveries(token, deliveriesToPush);
       }
 
-      await api.pushDeliveries(token, deliveriesToPush);
-      
+      // 2. Sync Documents
+      const syncedDocIds: string[] = [];
+      if (pendingDocs.length > 0) {
+        setProgress(50);
+        for (const doc of pendingDocs) {
+          const res = await fetch(doc.photoData);
+          const blob = await res.blob();
+          const file = new File([blob], `doc-${doc.doc_type_id}-${doc.beneficiary_folio}.jpg`, { type: 'image/jpeg' });
+          await api.uploadDocument(token, file, {
+            beneficiary_folio: doc.beneficiary_folio,
+            program_id: doc.program_id,
+            doc_type_id: doc.doc_type_id,
+            doc_type_name: doc.doc_type_name
+          });
+          syncedDocIds.push(doc.id);
+        }
+      }
+
       setProgress(85);
-      // After push, pull fresh data to ensure status is updated from server
       const syncData = await api.pullBeneficiaries(token);
       storage.saveBeneficiaries(syncData.beneficiaries);
+      storage.savePrograms(syncData.programs);
+      storage.saveDocuments(syncData.documents);
       
-      // IMPORTANT: Only clear the ones that were synced
-      storage.removeDeliveriesByIds(syncedIds);
+      storage.removeDeliveriesByIds(syncedDeliveryIds);
+      storage.removePendingDocumentsByIds(syncedDocIds);
       
       setProgress(100);
       setTimeout(() => {
@@ -101,7 +93,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   };
 
   const totalToday = beneficiaries.filter(b => b.deliveryStatus === 'DELIVERED').length;
-  const pendingCount = pendingDeliveries.length;
+  const pendingCount = pendingDeliveries.length + pendingDocs.length;
 
   return (
     <div className="bg-surface text-on-surface min-h-screen pb-24">

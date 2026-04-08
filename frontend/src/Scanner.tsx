@@ -147,14 +147,62 @@ export default function Scanner() {
     };
 
     storage.savePendingDelivery(newDelivery);
-    setSuccess(true);
-    setTimeout(() => {
-      setSuccess(false);
-      setSelectedBeneficiary(null);
-      setFolioInput('');
-      setCapturedPhoto(null);
-      setIsCapturing(false);
-    }, 2000);
+    setCapturedPhoto(null);
+    setIsCapturing(false);
+    // After delivery, the UI will automatically show missingDocs if any
+    if (missingDocs.length === 0) {
+      setSuccess(true);
+      setTimeout(() => {
+        setSuccess(false);
+        setSelectedBeneficiary(null);
+        setFolioInput('');
+      }, 2000);
+    }
+  };
+
+  // --- EXPEDIENTE CAPTURE LOGIC ---
+
+  const [capturingDocId, setCapturingDocId] = useState<string | null>(null);
+  const [capturingDocName, setCapturingDocName] = useState<string | null>(null);
+
+  const getMissingDocs = (beneficiary: storage.Beneficiary) => {
+    const programs = storage.getPrograms();
+    const allDocs = storage.getDocuments();
+    // Filter docs already on server for this beneficiary
+    const myDocs = allDocs.filter(d => d.beneficiary_folio === beneficiary.folio);
+    // Find the program
+    const program = programs.find(p => p.name === beneficiary.programName);
+    if (!program) return [];
+    // Return doc types not yet present in myDocs
+    return program.docTypes.filter(dt => !myDocs.some(md => md.doc_type_id === dt.id));
+  };
+
+  const missingDocs = selectedBeneficiary ? getMissingDocs(selectedBeneficiary) : [];
+
+  const handleDocumentCapture = (dtId: string, dtName: string) => {
+    setCapturingDocId(dtId);
+    setCapturingDocName(dtName);
+    setIsCapturing(true);
+  };
+
+  const handleConfirmDocument = () => {
+    if (!selectedBeneficiary || !capturedPhoto || !capturingDocId) return;
+    
+    const newDoc: storage.PendingDocument = {
+      id: crypto.randomUUID(),
+      beneficiary_folio: selectedBeneficiary.folio,
+      program_id: storage.getPrograms().find(p => p.name === selectedBeneficiary.programName)?.id || 'UNKNOWN',
+      doc_type_id: capturingDocId,
+      doc_type_name: capturingDocName || 'Documento',
+      photoData: capturedPhoto
+    };
+
+    storage.savePendingDocument(newDoc);
+    setCapturedPhoto(null);
+    setIsCapturing(false);
+    setCapturingDocId(null);
+    setCapturingDocName(null);
+    // UI will re-render and missingDocs will update
   };
 
   return (
@@ -212,55 +260,104 @@ export default function Scanner() {
           </div>
         )}
 
-        {/* Modal: Beneficiary & Photo Capture */}
+        {/* Modal: Beneficiary & Doc Capture Flow */}
         {selectedBeneficiary && !success && (
           <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
-            <div className="bg-surface rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in">
+            <div className="bg-surface rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in max-h-[90vh] flex flex-col">
               <div className="bg-primary p-4 text-white">
                 <p className="text-[10px] uppercase font-bold tracking-widest opacity-70">Beneficiario Validado</p>
                 <h2 className="text-xl font-black">{selectedBeneficiary.fullName}</h2>
               </div>
-              <div className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-xs">
-                  <div><p className="text-on-surface-variant font-bold uppercase">Folio</p><p className="font-bold text-primary">{selectedBeneficiary.folio}</p></div>
-                  <div><p className="text-on-surface-variant font-bold uppercase">Programa</p><p className="font-bold text-primary">{selectedBeneficiary.programName}</p></div>
-                </div>
+              
+              <div className="p-6 space-y-4 overflow-y-auto">
+                {/* 1. DELIVERY MODE */}
+                {!isCapturing && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 text-xs">
+                      <div><p className="text-on-surface-variant font-bold uppercase">Folio</p><p className="font-bold text-primary">{selectedBeneficiary.folio}</p></div>
+                      <div><p className="text-on-surface-variant font-bold uppercase">Programa</p><p className="font-bold text-primary">{selectedBeneficiary.programName}</p></div>
+                    </div>
 
-                <div className="border-t border-surface-variant pt-4">
-                  {!isCapturing ? (
-                    <button onClick={() => setIsCapturing(true)} className="w-full bg-primary-container text-white py-4 rounded-xl flex items-center justify-center gap-2 font-bold uppercase tracking-widest">
-                      <span className="material-symbols-outlined">photo_camera</span> Capturar Evidencia
-                    </button>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="aspect-video bg-black rounded-xl relative overflow-hidden flex items-center justify-center border-2 border-primary">
-                        {capturedPhoto ? (
-                          <img src={capturedPhoto} className="w-full h-full object-cover" alt="Evidence" />
-                        ) : (
-                          <>
-                            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 border-2 border-white/20 m-4 rounded-lg pointer-events-none"></div>
-                          </>
-                        )}
-                      </div>
-                      <canvas ref={canvasRef} className="hidden" />
-                      
-                      {capturedPhoto ? (
-                        <div className="flex gap-2">
-                          <button onClick={() => setCapturedPhoto(null)} className="flex-1 bg-surface-variant text-on-surface-variant py-3 rounded-xl font-bold uppercase text-xs">Reintentar</button>
-                          <button onClick={handleConfirmDelivery} className="flex-[2] bg-secondary text-white py-3 rounded-xl font-bold uppercase text-xs flex items-center justify-center gap-2">
-                            <span className="material-symbols-outlined text-sm">check</span> Confirmar Entrega
-                          </button>
-                        </div>
-                      ) : (
-                        <button onClick={takePhoto} className="w-full bg-secondary text-white py-4 rounded-xl font-bold uppercase tracking-widest flex items-center justify-center gap-2">
-                          <span className="material-symbols-outlined">camera</span> Tomar Fotografía
+                    <div className="border-t border-surface-variant pt-4">
+                      {selectedBeneficiary.deliveryStatus === 'PENDING' ? (
+                        <button onClick={() => setIsCapturing(true)} className="w-full bg-primary-container text-white py-4 rounded-xl flex items-center justify-center gap-2 font-bold uppercase tracking-widest">
+                          <span className="material-symbols-outlined">photo_camera</span> Capturar Entrega
                         </button>
+                      ) : (
+                        <div className="bg-green-100 rounded-xl p-3 flex items-center gap-2 text-green-700 font-bold text-xs uppercase tracking-tighter">
+                          <span className="material-symbols-outlined">check_circle</span> Entrega Registrada
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-                {!capturedPhoto && <button onClick={() => { setSelectedBeneficiary(null); setIsCapturing(false); }} className="w-full text-center text-[10px] font-bold text-outline uppercase py-2">Cancelar</button>}
+
+                    {/* 2. EXPEDIENTE CHECKLIST */}
+                    {missingDocs.length > 0 && (
+                      <div className="border-t border-surface-variant pt-4 space-y-3">
+                        <p className="text-[10px] uppercase font-black tracking-widest text-[#cf5913]">Documentos Faltantes ({missingDocs.length})</p>
+                        <div className="space-y-2">
+                          {missingDocs.map(dt => (
+                            <button key={dt.id} onClick={() => handleDocumentCapture(dt.id, dt.name)}
+                              className="w-full bg-white border-2 border-dashed border-gray-300 rounded-xl p-3 flex items-center justify-between group hover:border-primary transition-colors text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="material-symbols-outlined text-gray-400 group-hover:text-primary">upload_file</span>
+                                <span className="text-xs font-bold text-gray-600">{dt.name}</span>
+                              </div>
+                              <span className="material-symbols-outlined text-primary opacity-0 group-hover:opacity-100 transition-opacity">photo_camera</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {missingDocs.length === 0 && selectedBeneficiary.deliveryStatus === 'DELIVERED' && (
+                      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-center">
+                         <span className="material-symbols-outlined text-blue-400">task_alt</span>
+                         <p className="text-xs font-bold text-blue-600 mt-1 uppercase tracking-widest">Expediente Completo</p>
+                         <button onClick={() => setSelectedBeneficiary(null)} className="mt-2 w-full bg-blue-600 text-white py-2 rounded-xl text-xs font-bold">TERMINAR</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. CAMERA INTERFACE */}
+                {isCapturing && (
+                  <div className="space-y-4">
+                    <p className="text-xs font-bold text-center text-primary uppercase">
+                      Capturando: {capturingDocName || 'Evidencia de Entrega'}
+                    </p>
+                    <div className="aspect-square bg-black rounded-xl relative overflow-hidden flex items-center justify-center border-2 border-primary">
+                      {capturedPhoto ? (
+                        <img src={capturedPhoto} className="w-full h-full object-cover" alt="Capture" />
+                      ) : (
+                        <>
+                          <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 border-2 border-white/20 m-6 rounded-lg pointer-events-none"></div>
+                        </>
+                      )}
+                    </div>
+                    <canvas ref={canvasRef} className="hidden" />
+                    
+                    {capturedPhoto ? (
+                      <div className="flex gap-2">
+                        <button onClick={() => setCapturedPhoto(null)} className="flex-1 bg-surface-variant text-on-surface-variant py-3 rounded-xl font-bold uppercase text-xs">Reintentar</button>
+                        <button onClick={capturingDocId ? handleConfirmDocument : handleConfirmDelivery} 
+                          className="flex-[2] bg-secondary text-white py-3 rounded-xl font-bold uppercase text-xs flex items-center justify-center gap-2">
+                          <span className="material-symbols-outlined text-sm">check</span> {capturingDocId ? 'Guardar Documento' : 'Confirmar Entrega'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <button onClick={takePhoto} className="w-full bg-secondary text-white py-4 rounded-xl font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+                          <span className="material-symbols-outlined">camera</span> DISPARAR
+                        </button>
+                        <button onClick={() => { setIsCapturing(false); setCapturingDocId(null); setCapturedPhoto(null); }} 
+                          className="w-full text-xs font-bold text-outline text-center uppercase py-2">Cancelar</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {!isCapturing && <button onClick={() => { setSelectedBeneficiary(null); }} className="w-full text-center text-[10px] font-bold text-outline uppercase py-4 border-t border-gray-100 mt-4">Cerrar</button>}
               </div>
             </div>
           </div>

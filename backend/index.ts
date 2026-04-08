@@ -155,10 +155,29 @@ app.post('/api/login', (req, res) => {
 
 // --- SYNC PULL (GET) ---
 app.get('/api/sync/pull', auth, (req, res) => {
-    // This would ideally accept a last_sync_timestamp and return only modified records
-    db.all('SELECT * FROM beneficiaries', [], (err, rows) => {
+    // 1. Get beneficiaries
+    db.all('SELECT * FROM beneficiaries', [], (err, beneficiaries) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ beneficiaries: rows });
+        
+        // 2. Get programs with their requirements
+        db.all('SELECT * FROM programs WHERE status = "ACTIVE"', [], (err, programs) => {
+            db.all('SELECT * FROM program_document_types', [], (err, docTypes) => {
+                db.all('SELECT * FROM program_custom_fields', [], (err, customFields) => {
+                    // 3. Get document status summary (to know what's already uploaded)
+                    db.all('SELECT id, beneficiary_folio, doc_type_id FROM documents', [], (err, documents) => {
+                        res.json({ 
+                            beneficiaries, 
+                            programs: programs.map((p: any) => ({
+                                ...p,
+                                docTypes: docTypes.filter((dt: any) => dt.program_id === p.id),
+                                customFields: customFields.filter((cf: any) => cf.program_id === p.id)
+                            })),
+                            documents
+                        });
+                    });
+                });
+            });
+        });
     });
 });
 

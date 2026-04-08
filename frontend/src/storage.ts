@@ -26,9 +26,35 @@ export interface Delivery {
 const KEYS = {
   BENEFICIARIES: 'sideab_beneficiaries',
   PENDING_DELIVERIES: 'sideab_pending_deliveries',
+  PENDING_DOCUMENTS: 'sideab_pending_documents',
+  PROGRAMS: 'sideab_programs',
+  DOCUMENTS: 'sideab_documents',
   TOKEN: 'sideab_token',
   USER: 'sideab_user'
 };
+
+export interface Program {
+  id: string;
+  name: string;
+  institution?: string;
+  docTypes: { id: string; name: string; is_required: boolean }[];
+  customFields: { field_key: string; field_label: string; field_type: string; is_required: boolean }[];
+}
+
+export interface DocumentSummary {
+  id: string;
+  beneficiary_folio: string;
+  doc_type_id: string;
+}
+
+export interface PendingDocument {
+  id: string;
+  beneficiary_folio: string;
+  program_id: string;
+  doc_type_id: string;
+  doc_type_name: string;
+  photoData: string;
+}
 
 export const saveToken = (token: string) => localStorage.setItem(KEYS.TOKEN, token);
 export const getToken = () => localStorage.getItem(KEYS.TOKEN);
@@ -44,6 +70,24 @@ export const saveBeneficiaries = (beneficiaries: Beneficiary[]) => {
 
 export const getBeneficiaries = (): Beneficiary[] => {
   const data = localStorage.getItem(KEYS.BENEFICIARIES);
+  return data ? JSON.parse(data) : [];
+};
+
+export const savePrograms = (programs: Program[]) => {
+  localStorage.setItem(KEYS.PROGRAMS, JSON.stringify(programs));
+};
+
+export const getPrograms = (): Program[] => {
+  const data = localStorage.getItem(KEYS.PROGRAMS);
+  return data ? JSON.parse(data) : [];
+};
+
+export const saveDocuments = (documents: DocumentSummary[]) => {
+  localStorage.setItem(KEYS.DOCUMENTS, JSON.stringify(documents));
+};
+
+export const getDocuments = (): DocumentSummary[] => {
+  const data = localStorage.getItem(KEYS.DOCUMENTS);
   return data ? JSON.parse(data) : [];
 };
 
@@ -77,6 +121,28 @@ export const removeDeliveriesByIds = (ids: string[]) => {
   localStorage.setItem(KEYS.PENDING_DELIVERIES, JSON.stringify(filtered));
 };
 
+export const savePendingDocument = (doc: PendingDocument) => {
+  const existing = getPendingDocuments();
+  existing.push(doc);
+  localStorage.setItem(KEYS.PENDING_DOCUMENTS, JSON.stringify(existing));
+
+  // Add to local documents summary so UI updates
+  const docs = getDocuments();
+  docs.push({ id: doc.id, beneficiary_folio: doc.beneficiary_folio, doc_type_id: doc.doc_type_id });
+  saveDocuments(docs);
+};
+
+export const getPendingDocuments = (): PendingDocument[] => {
+  const data = localStorage.getItem(KEYS.PENDING_DOCUMENTS);
+  return data ? JSON.parse(data) : [];
+};
+
+export const removePendingDocumentsByIds = (ids: string[]) => {
+  const items = getPendingDocuments();
+  const filtered = items.filter(i => !ids.includes(i.id));
+  localStorage.setItem(KEYS.PENDING_DOCUMENTS, JSON.stringify(filtered));
+};
+
 export const removeDelivery = (folio: string) => {
   // 1. Remove from pending deliveries
   const pending = getPendingDeliveries();
@@ -96,3 +162,4 @@ export const removeDelivery = (folio: string) => {
 export const logout = () => {
   localStorage.clear();
 };
+
