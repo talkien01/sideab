@@ -112,6 +112,16 @@ export const deleteUser = async (token: string, id: string) => {
 
 // ── PHASE 8: PROGRAMS ────────────────────────────────────────────────────────
 
+export const importPrograms = async (token: string, programs: any[]) => {
+  const res = await fetch(`${API_URL}/admin/programs/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(programs)
+  });
+  if (!res.ok) throw new Error('Error al importar programas');
+  return res.json();
+};
+
 export const getPrograms = async (token: string) => {
   const r = await fetch(`${API_URL}/admin/programs`, { headers: { 'Authorization': `Bearer ${token}` } });
   if (!r.ok) throw new Error('Error al obtener programas');

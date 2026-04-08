@@ -112,7 +112,29 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
   const uniquePrograms = useMemo(() => [...new Set(deliveries.map(d => d.programName))], [deliveries]);
   const allPrograms = useMemo(() => [...new Set(beneficiaries.map((b: any) => b.programName))], [beneficiaries]);
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const downloadCSVTemplate = (type: 'beneficiarios' | 'programas') => {
+    let headers = '';
+    let rows = '';
+    let filename = '';
+
+    if (type === 'beneficiarios') {
+      headers = 'folio,fullName,age,address,phone,programName\n';
+      rows = 'FOL-TEST-001,Juan Pérez,30,Calle Falsa 123,555-1234,General\n';
+      filename = 'plantilla_beneficiarios.csv';
+    } else {
+      headers = 'name,institution,description\n';
+      rows = 'Salud en tu Colonia,Secretaría de Salud,Atención médica domiciliaria\n';
+      filename = 'plantilla_programas.csv';
+    }
+
+    const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'beneficiarios' | 'programas' = 'beneficiarios') => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -126,7 +148,7 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
       const lines = text.split('\n');
       const headers = lines[0].split(',');
       
-      const beneficiaries = lines.slice(1).filter(line => line.trim()).map(line => {
+      const data = lines.slice(1).filter(line => line.trim()).map(line => {
         const values = line.split(',');
         const obj: any = {};
         headers.forEach((header, i) => {
@@ -139,8 +161,14 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
         const token = storage.getToken();
         if (!token) throw new Error('No token provided');
         
-        await api.importBeneficiaries(token, beneficiaries);
-        setImportStatus({ type: 'success', message: `¡Éxito! Se importaron ${beneficiaries.length} beneficiarios al padrón.` });
+        if (type === 'beneficiarios') {
+          await api.importBeneficiaries(token, data);
+          setImportStatus({ type: 'success', message: `¡Éxito! Se importaron ${data.length} beneficiarios.` });
+        } else {
+          await api.importPrograms(token, data);
+          setImportStatus({ type: 'success', message: `¡Éxito! Se importaron ${data.length} programas de apoyo.` });
+        }
+        
         await fetchData();
         inputRef.value = '';
         setTimeout(() => setActiveTab('dashboard'), 2500);
@@ -540,42 +568,98 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
 
         {/* ─────────────── CARGA MASIVA ─────────────── */}
         {activeTab === 'import' && (
-          <div className="max-w-xl mx-auto space-y-6 animate-fade-in pt-10 text-center">
-            {importStatus && (
-              <div className={`p-5 rounded-2xl flex items-center gap-4 text-left border ${
-                importStatus.type === 'success'
-                  ? 'bg-secondary/10 border-secondary/30 text-secondary'
-                  : 'bg-red-50 border-red-200 text-red-700'
-              }`}>
-                <span className="material-symbols-outlined text-3xl">
-                  {importStatus.type === 'success' ? 'check_circle' : 'error'}
+          <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 animate-fade-in pt-10">
+            {/* Import Card */}
+            <div className="space-y-6">
+              {importStatus && (
+                <div className={`p-5 rounded-2xl flex items-center gap-4 text-left border ${
+                  importStatus.type === 'success' ? 'bg-secondary/10 border-secondary/30 text-secondary' : 'bg-red-50 border-red-200 text-red-700'
+                }`}>
+                  <span className="material-symbols-outlined text-3xl">
+                    {importStatus.type === 'success' ? 'check_circle' : 'error'}
+                  </span>
+                  <div>
+                    <p className="font-black text-sm">{importStatus.type === 'success' ? '¡Éxito!' : 'Error'}</p>
+                    <p className="text-xs font-medium mt-0.5">{importStatus.message}</p>
+                  </div>
+                </div>
+              )}
+              
+              <div className="bg-white p-10 rounded-[40px] shadow-2xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center text-center">
+                <span className="material-symbols-outlined text-6xl text-primary mb-6">
+                  {importing ? 'hourglass_top' : 'upload_file'}
                 </span>
-                <div>
-                  <p className="font-black text-sm">{importStatus.type === 'success' ? '¡Importación exitosa!' : 'Error'}</p>
-                  <p className="text-xs font-medium mt-0.5">{importStatus.message}</p>
-                  {importStatus.type === 'success' && <p className="text-[10px] mt-1 opacity-70">Redirigiendo al resumen…</p>}
+                <h2 className="text-2xl font-black text-primary mb-2">Importar Datos</h2>
+                <p className="text-sm text-on-surface-variant mb-8 max-w-xs">Seleccione el tipo de información que desea cargar masivamente al sistema.</p>
+                
+                <div className="grid grid-cols-1 gap-3 w-full">
+                  <label className={`text-white font-bold py-4 px-6 rounded-2xl shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 ${
+                    importing ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary hover:bg-primary-container active:scale-95'
+                  }`}>
+                    <span className="material-symbols-outlined text-sm">person_add</span> IMPORTAR BENEFICIARIOS
+                    <input type="file" accept=".csv" className="hidden" onChange={(e) => handleFileUpload(e, 'beneficiarios')} disabled={importing} />
+                  </label>
+                  
+                  <label className={`text-primary font-bold py-4 px-6 rounded-2xl border-2 border-primary cursor-pointer transition-all flex items-center justify-center gap-2 ${
+                    importing ? 'opacity-30 cursor-not-allowed' : 'hover:bg-primary/5 active:scale-95'
+                  }`}>
+                    <span className="material-symbols-outlined text-sm">folder_special</span> IMPORTAR PROGRAMAS
+                    <input type="file" accept=".csv" className="hidden" onChange={(e) => handleFileUpload(e, 'programas')} disabled={importing} />
+                  </label>
                 </div>
               </div>
-            )}
-            <div className="bg-white p-12 rounded-[40px] shadow-2xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center">
-              <span className="material-symbols-outlined text-6xl text-primary mb-6">
-                {importing ? 'hourglass_top' : 'upload_file'}
-              </span>
-              <h2 className="text-2xl font-black text-primary mb-2">Importar Padrón de Beneficiarios</h2>
-              <p className="text-sm text-on-surface-variant mb-8 max-w-xs">Seleccione su archivo CSV con el formato oficial para actualizar la base de datos nacional.</p>
-              <label className={`text-white font-bold py-4 px-10 rounded-2xl shadow-lg cursor-pointer transition-colors flex items-center gap-2 ${
-                importing ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary hover:bg-primary-container'
-              }`}>
-                {importing ? (
-                  <><span className="material-symbols-outlined text-sm animate-spin">sync</span> PROCESANDO...</>
-                ) : (
-                  <><span className="material-symbols-outlined text-sm">folder_open</span> SELECCIONAR ARCHIVO CSV</>
-                )}
-                <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} disabled={importing} />
-              </label>
-              <div className="mt-8 text-left w-full bg-surface-container-low p-4 rounded-xl">
-                <p className="text-[10px] font-black uppercase text-primary mb-2">Formato Requerido:</p>
-                <code className="text-[10px] text-on-surface-variant block font-mono">folio, fullName, age, address, phone, programName</code>
+            </div>
+
+            {/* Toolkit Card */}
+            <div className="bg-surface-container-low rounded-[40px] p-8 space-y-6">
+              <h3 className="text-lg font-black text-primary flex items-center gap-2">
+                <span className="material-symbols-outlined">construction</span> Kit de Herramientas Operativas
+              </h3>
+              <p className="text-sm text-on-surface-variant leading-relaxed">
+                Utilice estas plantillas para asegurar que sus archivos CSV tengan el formato correcto y se vinculen adecuadamente.
+              </p>
+              
+              <div className="space-y-3">
+                <button onClick={() => downloadCSVTemplate('beneficiarios')}
+                  className="w-full bg-white p-4 rounded-2xl flex items-center justify-between group hover:bg-primary/5 transition-colors border border-outline-variant/20 shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-primary">
+                      <span className="material-symbols-outlined">download</span>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xs font-bold text-on-surface">Plantilla de Beneficiarios</p>
+                      <p className="text-[10px] text-on-surface-variant">CSV con folio, nombre y programa</p>
+                    </div>
+                  </div>
+                  <span className="material-symbols-outlined text-primary opacity-0 group-hover:opacity-100 transition-opacity">chevron_right</span>
+                </button>
+
+                <button onClick={() => downloadCSVTemplate('programas')}
+                  className="w-full bg-white p-4 rounded-2xl flex items-center justify-between group hover:bg-primary/5 transition-colors border border-outline-variant/20 shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center text-secondary">
+                      <span className="material-symbols-outlined">download</span>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xs font-bold text-on-surface">Plantilla de Programas</p>
+                      <p className="text-[10px] text-on-surface-variant">CSV para configuración masiva</p>
+                    </div>
+                  </div>
+                  <span className="material-symbols-outlined text-primary opacity-0 group-hover:opacity-100 transition-opacity">chevron_right</span>
+                </button>
+              </div>
+
+              <div className="pt-4 border-t border-outline-variant/20">
+                <p className="text-[10px] font-black uppercase text-primary mb-3">Recursos de Apoyo</p>
+                <div className="bg-primary/5 rounded-2xl p-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-primary">menu_book</span>
+                    <p className="text-[10px] font-bold text-on-surface leading-tight">MANUAL OPERATIVO DE CONFIGURACIÓN FASE 8</p>
+                  </div>
+                  <span className="text-[9px] font-black text-primary px-2 py-0.5 rounded-lg bg-primary/10">DISPONIBLE</span>
+                </div>
               </div>
             </div>
           </div>

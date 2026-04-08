@@ -491,13 +491,36 @@ app.post('/api/admin/programs', auth, isAdmin, (req: any, res) => {
     );
 });
 
-// PATCH update program status
+// POST update program status
 app.patch('/api/admin/programs/:id', auth, isAdmin, (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
     db.run('UPDATE programs SET status = ? WHERE id = ?', [status, id], function(err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: 'Programa actualizado' });
+    });
+});
+
+// POST bulk import programs
+app.post('/api/admin/programs/import', auth, isAdmin, (req: any, res) => {
+    const programs = req.body;
+    if (!Array.isArray(programs)) return res.status(400).json({ error: 'Arreglo inválido' });
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        const stmt = db.prepare(`INSERT OR REPLACE INTO programs (id, name, institution, description, status, created_at, created_by)
+                                VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)`);
+        
+        for (const p of programs) {
+            const id = p.id || `PROG-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+            stmt.run(id, p.name, p.institution || '', p.description || '', new Date().toISOString(), req.user.id);
+        }
+
+        db.run('COMMIT', (err) => {
+            stmt.finalize();
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ message: 'Programas importados', count: programs.length });
+        });
     });
 });
 
