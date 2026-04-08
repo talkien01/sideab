@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import * as api from './api';
 import * as storage from './storage';
+import { ProgramsPanel, ExpedienteDrawer } from './Phase8Components';
 
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -14,12 +15,17 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [beneficiaries, setBeneficiaries] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'deliveries' | 'import' | 'operators'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'deliveries' | 'import' | 'operators' | 'programs'>('dashboard');
   const [deliveriesSubView, setDeliveriesSubView] = useState<'padron' | 'entregas'>('entregas');
   const [loading, setLoading] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [importing, setImporting] = useState(false);
+
+  // Phase 8 state
+  const [programs, setPrograms] = useState<any[]>([]);
+  const [expediente, setExpediente] = useState<any | null>(null);
+  const [expedienteLoading, setExpedienteLoading] = useState(false);
 
   // Filters for deliveries
   const [filterProgram, setFilterProgram] = useState('');
@@ -46,17 +52,19 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
       const token = storage.getToken();
       if (!token) return;
       
-      const [statsResult, deliveriesResult, usersResult, beneficiariesResult] = await Promise.allSettled([
+      const [statsResult, deliveriesResult, usersResult, beneficiariesResult, programsResult] = await Promise.allSettled([
         api.getStats(token),
         api.getAdminDeliveries(token),
         api.getUsers(token),
         api.getAdminBeneficiaries(token),
+        api.getPrograms(token),
       ]);
       
       if (statsResult.status === 'fulfilled') setStats(statsResult.value);
       if (deliveriesResult.status === 'fulfilled') setDeliveries(deliveriesResult.value);
       if (usersResult.status === 'fulfilled') setUsers(usersResult.value);
       if (beneficiariesResult.status === 'fulfilled') setBeneficiaries(beneficiariesResult.value);
+      if (programsResult.status === 'fulfilled') setPrograms(programsResult.value);
     } catch (err) {
       console.error("Error fetching admin data:", err);
     } finally {
@@ -186,6 +194,20 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  const openExpediente = async (folio: string) => {
+    setExpedienteLoading(true);
+    try {
+      const token = storage.getToken();
+      if (!token) return;
+      const data = await api.getExpediente(token, folio);
+      setExpediente(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setExpedienteLoading(false);
+    }
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center h-screen bg-surface flex-col gap-4">
       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -203,13 +225,13 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex bg-white/10 p-1 rounded-xl gap-0.5">
-            {(['dashboard', 'deliveries', 'import', 'operators'] as const).map(tab => (
+            {(['dashboard', 'deliveries', 'programs', 'import', 'operators'] as const).map(tab => (
               <button 
                 key={tab}
                 onClick={() => setActiveTab(tab)} 
                 className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all uppercase tracking-widest ${activeTab === tab ? 'bg-white text-primary shadow-sm' : 'text-white/60 hover:text-white'}`}
               >
-                {tab === 'dashboard' ? 'Resumen' : tab === 'deliveries' ? 'Mesa de Control' : tab === 'import' ? 'Carga Masiva' : 'Operadores'}
+                {tab === 'dashboard' ? 'Resumen' : tab === 'deliveries' ? 'Mesa de Control' : tab === 'programs' ? 'Programas' : tab === 'import' ? 'Carga Masiva' : 'Operadores'}
               </button>
             ))}
           </div>
@@ -374,6 +396,7 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
                           { label: 'Teléfono', field: null },
                           { label: 'Dirección', field: null },
                           { label: 'Fecha Entrega', field: null },
+                          { label: 'Expediente', field: null },
                         ].map(col => (
                           <th key={col.label}
                             onClick={() => col.field && toggleSort(col.field)}
@@ -420,6 +443,16 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
                           <td className="px-5 py-3 text-[10px] text-on-surface-variant max-w-[160px] truncate">{b.address || '—'}</td>
                           <td className="px-5 py-3 text-[10px] font-bold text-on-surface-variant">
                             {b.scannedAt ? new Date(b.scannedAt).toLocaleDateString('es-MX') : '—'}
+                          </td>
+                          <td className="px-5 py-3">
+                            <button
+                              onClick={() => openExpediente(b.folio)}
+                              disabled={expedienteLoading}
+                              className="text-[10px] font-black text-primary flex items-center gap-1 hover:underline disabled:opacity-40"
+                            >
+                              <span className="material-symbols-outlined text-sm">folder_open</span>
+                              Ver
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -636,6 +669,25 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
       </main>
+
+      {/* ─── PROGRAMAS TAB ─── (rendered outside main to allow full-height layout) */}
+      {activeTab === 'programs' && (
+        <main className="pt-24 px-6 pb-20 max-w-7xl mx-auto space-y-6 animate-fade-in">
+          <ProgramsPanel
+            programs={programs}
+            token={storage.getToken() || ''}
+            onRefresh={fetchData}
+          />
+        </main>
+      )}
+
+      {/* Expediente Drawer */}
+      {expediente && (
+        <ExpedienteDrawer
+          data={expediente}
+          onClose={() => setExpediente(null)}
+        />
+      )}
 
       {/* Photo Modal */}
       {selectedPhoto && (

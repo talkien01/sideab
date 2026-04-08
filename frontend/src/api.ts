@@ -109,3 +109,80 @@ export const deleteUser = async (token: string, id: string) => {
   if (!response.ok) { const err = await response.json(); throw new Error(err.error); }
   return response.json();
 };
+
+// ── PHASE 8: PROGRAMS ────────────────────────────────────────────────────────
+
+export const getPrograms = async (token: string) => {
+  const r = await fetch(`${API_URL}/admin/programs`, { headers: { 'Authorization': `Bearer ${token}` } });
+  if (!r.ok) throw new Error('Error al obtener programas');
+  return r.json();
+};
+
+export const getProgram = async (token: string, id: string) => {
+  const r = await fetch(`${API_URL}/admin/programs/${id}`, { headers: { 'Authorization': `Bearer ${token}` } });
+  if (!r.ok) throw new Error('Error al obtener programa');
+  return r.json();
+};
+
+export const createProgram = async (token: string, data: any) => {
+  const r = await fetch(`${API_URL}/admin/programs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+  return r.json();
+};
+
+export const updateProgramStatus = async (token: string, id: string, status: string) => {
+  const r = await fetch(`${API_URL}/admin/programs/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ status }),
+  });
+  if (!r.ok) throw new Error('Error al actualizar programa');
+  return r.json();
+};
+
+export const createCycle = async (token: string, data: { program_id: string; name: string; period: string }) => {
+  const r = await fetch(`${API_URL}/admin/cycles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+  if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+  return r.json();
+};
+
+export const updateCycleStatus = async (token: string, id: string, status: 'OPEN' | 'CLOSED') => {
+  const r = await fetch(`${API_URL}/admin/cycles/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ status }),
+  });
+  if (!r.ok) throw new Error('Error al actualizar ciclo');
+  return r.json();
+};
+
+export const uploadDocument = async (token: string, file: File, meta: {
+  beneficiary_folio: string; program_id: string; doc_type_id?: string; doc_type_name: string;
+}) => {
+  const form = new FormData();
+  form.append('photo', file);
+  Object.entries(meta).forEach(([k, v]) => form.append(k, v));
+  const r = await fetch(`${API_URL}/upload/document`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+    body: form,
+  });
+  if (!r.ok) throw new Error('Error al subir documento');
+  return r.json();
+};
+
+export const getExpediente = async (token: string, folio: string) => {
+  const r = await fetch(`${API_URL}/admin/beneficiaries/${folio}/expediente`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (!r.ok) throw new Error('Error al obtener expediente');
+  return r.json();
+};

@@ -29,58 +29,96 @@ const SECRET = 'SIDEAB_SUPER_SECRET';
 const db = new sqlite3.Database('./sideab.db');
 
 db.serialize(() => {
-    // Users table
+    // ── CORE TABLES (existing) ──────────────────────────────────────────
     db.run(`CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        password TEXT,
-        role TEXT DEFAULT 'OPERATOR'
+        id TEXT PRIMARY KEY, name TEXT, password TEXT, role TEXT DEFAULT 'OPERATOR'
     )`);
-
-    // Beneficiaries table
     db.run(`CREATE TABLE IF NOT EXISTS beneficiaries (
-        folio TEXT PRIMARY KEY,
-        fullName TEXT,
-        age INTEGER,
-        address TEXT,
-        phone TEXT,
-        programName TEXT,
-        approvalStatus TEXT,
-        deliveryStatus TEXT,
-        updatedAt DATETIME
+        folio TEXT PRIMARY KEY, fullName TEXT, age INTEGER, address TEXT,
+        phone TEXT, programName TEXT, approvalStatus TEXT, deliveryStatus TEXT, updatedAt DATETIME
     )`);
-
-    // Deliveries table
     db.run(`CREATE TABLE IF NOT EXISTS deliveries (
-        id TEXT PRIMARY KEY,
-        beneficiaryFolio TEXT,
-        operatorId TEXT,
-        scannedAt DATETIME,
-        deviceId TEXT,
-        location TEXT,
-        evidencePhotoCloudUrl TEXT,
-        integrityHash TEXT
+        id TEXT PRIMARY KEY, beneficiaryFolio TEXT, operatorId TEXT,
+        scannedAt DATETIME, deviceId TEXT, location TEXT,
+        evidencePhotoCloudUrl TEXT, integrityHash TEXT,
+        cycle_id TEXT
     )`);
 
-    // Insert dummy data securely using parameterized query simulation
+    // ── PHASE 8 TABLES ──────────────────────────────────────────────────
+    db.run(`CREATE TABLE IF NOT EXISTS programs (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, institution TEXT,
+        description TEXT, status TEXT DEFAULT 'ACTIVE',
+        created_at TEXT, created_by TEXT
+    )`);
+    db.run(`CREATE TABLE IF NOT EXISTS program_document_types (
+        id TEXT PRIMARY KEY, program_id TEXT REFERENCES programs(id),
+        name TEXT, is_required INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0
+    )`);
+    db.run(`CREATE TABLE IF NOT EXISTS program_custom_fields (
+        id TEXT PRIMARY KEY, program_id TEXT REFERENCES programs(id),
+        field_key TEXT, field_label TEXT,
+        field_type TEXT DEFAULT 'text',
+        field_options TEXT, is_required INTEGER DEFAULT 0, sort_order INTEGER DEFAULT 0
+    )`);
+    db.run(`CREATE TABLE IF NOT EXISTS cycles (
+        id TEXT PRIMARY KEY, program_id TEXT REFERENCES programs(id),
+        name TEXT, period TEXT, status TEXT DEFAULT 'OPEN', created_at TEXT
+    )`);
+    db.run(`CREATE TABLE IF NOT EXISTS beneficiary_custom_values (
+        beneficiary_folio TEXT, program_id TEXT, field_key TEXT, value TEXT,
+        PRIMARY KEY (beneficiary_folio, program_id, field_key)
+    )`);
+    db.run(`CREATE TABLE IF NOT EXISTS documents (
+        id TEXT PRIMARY KEY, beneficiary_folio TEXT, program_id TEXT,
+        doc_type_id TEXT, doc_type_name TEXT,
+        file_url TEXT, uploaded_at TEXT, uploaded_by TEXT
+    )`);
+
+    // ── SEED USERS ──────────────────────────────────────────────────────
     db.get('SELECT COUNT(*) as count FROM users', [], (err, row: any) => {
         if (row.count === 0) {
-            db.run(`INSERT INTO users (id, name, password, role) VALUES ('ADMIN01', 'Operador Alfa', '12345678', 'OPERATOR')`);
-            db.run(`INSERT INTO users (id, name, password, role) VALUES ('COORD01', 'Coordinador General', 'admin1234', 'ADMIN')`);
+            db.run(`INSERT INTO users VALUES ('ADMIN01','Operador Alfa','12345678','OPERATOR')`);
+            db.run(`INSERT INTO users VALUES ('COORD01','Coordinador General','admin1234','ADMIN')`);
         }
     });
 
+    // ── AUTO-MIGRATION: create default program for existing beneficiaries ─
+    db.get("SELECT COUNT(*) as count FROM programs WHERE id = 'PROG-DEFAULT'", [], (err, row: any) => {
+        if (row && row.count === 0) {
+            const now = new Date().toISOString();
+            db.run(`INSERT INTO programs (id, name, institution, description, status, created_at, created_by)
+                    VALUES ('PROG-DEFAULT', 'Programa General', 'DIF / Gobierno Municipal',
+                            'Programa migrado automáticamente desde datos existentes', 'ACTIVE', ?, 'SYSTEM')`, [now]);
+            // Default document types
+            const docTypes = ['INE Anverso', 'INE Reverso', 'CURP', 'Comprobante de Domicilio'];
+            docTypes.forEach((name, i) => {
+                const id = `DT-${i + 1}`;
+                db.run(`INSERT OR IGNORE INTO program_document_types (id, program_id, name, is_required, sort_order)
+                        VALUES (?, 'PROG-DEFAULT', ?, 1, ?)`, [id, name, i]);
+            });
+            // Default custom field: CURP
+            db.run(`INSERT OR IGNORE INTO program_custom_fields
+                    (id, program_id, field_key, field_label, field_type, is_required, sort_order)
+                    VALUES ('CF-1', 'PROG-DEFAULT', 'curp', 'CURP', 'text', 1, 0)`);
+            // Default cycle
+            db.run(`INSERT OR IGNORE INTO cycles (id, program_id, name, period, status, created_at)
+                    VALUES ('CYC-1', 'PROG-DEFAULT', 'Ciclo General 2026', '2026', 'OPEN', ?)`, [now]);
+            console.log('[SIDEAB] Auto-migración: Programa General creado con datos existentes.');
+        }
+    });
+
+    // ── SEED TEST BENEFICIARIES ─────────────────────────────────────────
     db.get('SELECT COUNT(*) as count FROM beneficiaries', [], (err, row: any) => {
         if (row.count === 0) {
-            // Un par de beneficiarios de prueba
-            const stmt = db.prepare(`INSERT INTO beneficiaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-            stmt.run('FOL-00001', 'Juan Carlos Pérez', 45, 'Calle 1 Local', '555-1234', 'Apoyo Alimentario', 'APPROVED', 'PENDING', new Date().toISOString());
-            stmt.run('FOL-00002', 'Marta Rodríguez', 62, 'Av. Principal 44', '555-5678', 'Salud en Casa', 'APPROVED', 'DELIVERED', new Date().toISOString());
-            stmt.run('FOL-00003', 'Roberto Sanabria', 28, 'Privada 4 sur', '555-9012', 'Jóvenes Emprendedores', 'APPROVED', 'PENDING', new Date().toISOString());
+            const stmt = db.prepare(`INSERT INTO beneficiaries VALUES (?,?,?,?,?,?,?,?,?)`);
+            stmt.run('FOL-00001','Juan Carlos Pérez',45,'Calle 1 Local','555-1234','Apoyo Alimentario','APPROVED','PENDING',new Date().toISOString());
+            stmt.run('FOL-00002','Marta Rodríguez',62,'Av. Principal 44','555-5678','Salud en Casa','APPROVED','DELIVERED',new Date().toISOString());
+            stmt.run('FOL-00003','Roberto Sanabria',28,'Privada 4 sur','555-9012','Jóvenes Emprendedores','APPROVED','PENDING',new Date().toISOString());
             stmt.finalize();
         }
     });
 });
+
 
 // Middleware to verify JWT
 const auth = (req: any, res: any, next: any) => {
@@ -371,6 +409,164 @@ app.get('/api/admin/export/padron', (req, res) => {
         res.send(buffer);
     });
 });
+
+// ── PHASE 8: PROGRAMS ───────────────────────────────────────────────────────
+
+// GET all programs
+app.get('/api/admin/programs', auth, isAdmin, (req, res) => {
+    db.all(`SELECT p.*, 
+        (SELECT COUNT(*) FROM program_document_types WHERE program_id = p.id) as docTypesCount,
+        (SELECT COUNT(*) FROM program_custom_fields WHERE program_id = p.id) as customFieldsCount,
+        (SELECT COUNT(*) FROM cycles WHERE program_id = p.id AND status = 'OPEN') as openCycles
+        FROM programs p ORDER BY p.created_at DESC`, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+
+// GET single program with full config
+app.get('/api/admin/programs/:id', auth, isAdmin, (req, res) => {
+    const { id } = req.params;
+    db.get('SELECT * FROM programs WHERE id = ?', [id], (err, program: any) => {
+        if (err || !program) return res.status(404).json({ error: 'Programa no encontrado' });
+        db.all('SELECT * FROM program_document_types WHERE program_id = ? ORDER BY sort_order', [id], (err, docTypes) => {
+            db.all('SELECT * FROM program_custom_fields WHERE program_id = ? ORDER BY sort_order', [id], (err, customFields) => {
+                db.all('SELECT * FROM cycles WHERE program_id = ? ORDER BY created_at DESC', [id], (err, cycles) => {
+                    res.json({ ...program, docTypes, customFields, cycles });
+                });
+            });
+        });
+    });
+});
+
+// POST create new program
+app.post('/api/admin/programs', auth, isAdmin, (req: any, res) => {
+    const { name, institution, description, docTypes = [], customFields = [] } = req.body;
+    if (!name) return res.status(400).json({ error: 'El nombre es requerido' });
+    const id = `PROG-${Date.now()}`;
+    const now = new Date().toISOString();
+    db.run(`INSERT INTO programs (id, name, institution, description, status, created_at, created_by)
+            VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)`,
+        [id, name, institution || '', description || '', now, req.user.id],
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            // Insert document types
+            docTypes.forEach((dt: any, i: number) => {
+                const dtId = `DT-${Date.now()}-${i}`;
+                db.run(`INSERT INTO program_document_types (id, program_id, name, is_required, sort_order) VALUES (?,?,?,?,?)`,
+                    [dtId, id, dt.name, dt.is_required ? 1 : 0, i]);
+            });
+            // Insert custom fields
+            customFields.forEach((cf: any, i: number) => {
+                const cfId = `CF-${Date.now()}-${i}`;
+                db.run(`INSERT INTO program_custom_fields (id, program_id, field_key, field_label, field_type, field_options, is_required, sort_order)
+                        VALUES (?,?,?,?,?,?,?,?)`,
+                    [cfId, id, cf.field_key, cf.field_label, cf.field_type || 'text',
+                     cf.field_options ? JSON.stringify(cf.field_options) : null, cf.is_required ? 1 : 0, i]);
+            });
+            // Auto-create first cycle
+            db.run(`INSERT INTO cycles (id, program_id, name, period, status, created_at) VALUES (?,?,?,?,'OPEN',?)`,
+                [`CYC-${Date.now()}`, id, `Ciclo Inicial`, new Date().toISOString().slice(0,7), now]);
+            res.json({ message: 'Programa creado', id });
+        }
+    );
+});
+
+// PATCH update program status
+app.patch('/api/admin/programs/:id', auth, isAdmin, (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    db.run('UPDATE programs SET status = ? WHERE id = ?', [status, id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Programa actualizado' });
+    });
+});
+
+// ── PHASE 8: CYCLES ─────────────────────────────────────────────────────────
+
+// POST create cycle
+app.post('/api/admin/cycles', auth, isAdmin, (req, res) => {
+    const { program_id, name, period } = req.body;
+    if (!program_id || !name) return res.status(400).json({ error: 'program_id y name requeridos' });
+    const id = `CYC-${Date.now()}`;
+    db.run(`INSERT INTO cycles (id, program_id, name, period, status, created_at) VALUES (?,?,?,?,'OPEN',?)`,
+        [id, program_id, name, period || '', new Date().toISOString()],
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ message: 'Ciclo creado', id });
+        }
+    );
+});
+
+// PATCH close/open cycle
+app.patch('/api/admin/cycles/:id', auth, isAdmin, (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    db.run('UPDATE cycles SET status = ? WHERE id = ?', [status, id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: `Ciclo ${status === 'CLOSED' ? 'cerrado' : 'reabierto'}` });
+    });
+});
+
+// ── PHASE 8: DOCUMENTS ──────────────────────────────────────────────────────
+
+// Set up document upload directory
+const DOC_UPLOAD_DIR = path.join(__dirname, 'uploads', 'docs');
+if (!fs.existsSync(DOC_UPLOAD_DIR)) fs.mkdirSync(DOC_UPLOAD_DIR, { recursive: true });
+
+const docUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => cb(null, DOC_UPLOAD_DIR),
+        filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
+
+// POST upload document for a beneficiary
+app.post('/api/upload/document', auth, docUpload.single('photo'), (req: any, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No se subió archivo' });
+    const { beneficiary_folio, program_id, doc_type_id, doc_type_name } = req.body;
+    if (!beneficiary_folio || !program_id) return res.status(400).json({ error: 'Faltan parámetros' });
+
+    const id = `DOC-${Date.now()}`;
+    const fileUrl = `/uploads/docs/${req.file.filename}`;
+    db.run(`INSERT INTO documents (id, beneficiary_folio, program_id, doc_type_id, doc_type_name, file_url, uploaded_at, uploaded_by)
+            VALUES (?,?,?,?,?,?,?,?)`,
+        [id, beneficiary_folio, program_id, doc_type_id || '', doc_type_name || 'Documento', fileUrl, new Date().toISOString(), req.user.id],
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ url: fileUrl, id, message: 'Documento subido correctamente' });
+        }
+    );
+});
+
+// ── PHASE 8: EXPEDIENTE ─────────────────────────────────────────────────────
+
+// GET full expediente for a beneficiary
+app.get('/api/admin/beneficiaries/:folio/expediente', auth, isAdmin, (req, res) => {
+    const { folio } = req.params;
+    db.get('SELECT * FROM beneficiaries WHERE folio = ?', [folio], (err, beneficiary: any) => {
+        if (err || !beneficiary) return res.status(404).json({ error: 'Beneficiario no encontrado' });
+
+        // Get documents
+        db.all('SELECT * FROM documents WHERE beneficiary_folio = ? ORDER BY uploaded_at DESC', [folio], (err, documents) => {
+            // Get full delivery history
+            db.all(`SELECT d.*, c.name as cycle_name, c.period
+                    FROM deliveries d
+                    LEFT JOIN cycles c ON d.cycle_id = c.id
+                    WHERE d.beneficiaryFolio = ?
+                    ORDER BY d.scannedAt DESC`, [folio], (err, deliveries) => {
+                // Get custom field values
+                db.all('SELECT * FROM beneficiary_custom_values WHERE beneficiary_folio = ?', [folio], (err, customValues) => {
+                    res.json({ beneficiary, documents, deliveries, customValues });
+                });
+            });
+        });
+    });
+});
+
+// Serve document uploads
+app.use('/uploads/docs', express.static(DOC_UPLOAD_DIR));
 
 app.listen(3001, '0.0.0.0', () => {
     console.log('SIDEAB Backend (Offline-First Sync API) running on http://0.0.0.0:3001');
