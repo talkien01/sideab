@@ -1,0 +1,45 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Base de datos local (NO subir a Git)
+backend/sideab.db
+
+# Fotos de evidencia locales
+backend/uploads/
+
+# Variables de entorno
+.env
+backend/.env
+frontend/.env
+
+# Build de producción
+frontend/dist/
+
+# Logs y cachés
+*.log
+.cache/
+.vite/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Archivos temporales de la sesión
+drop_users.js
+stitch/
+stitch.zip
+CLAUDE.md
+
+# Reportes Excel generados
+*.xlsx
+
+# CSV de prueba (opcional, comentar si se quiere versionar)
+padron_prueba.csv

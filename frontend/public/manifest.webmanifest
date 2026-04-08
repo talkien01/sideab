@@ -1,0 +1,18 @@
+{
+  "name": "SIDEAB | Sistema de Entrega",
+  "short_name": "SIDEAB",
+  "description": "Sistema de Entrega a Beneficiarios con soporte offline y validación de folios.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000666",
+  "theme_color": "#000666",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}
