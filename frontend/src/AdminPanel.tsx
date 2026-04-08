@@ -294,19 +294,19 @@ export default function AdminPanel({ onLogout }: { onLogout: () => void }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white p-8 rounded-3xl shadow-sm border border-outline-variant/10 h-96">
                 <h3 className="text-sm font-black uppercase tracking-widest mb-6 text-primary">Avance por Programa</h3>
-                <ResponsiveContainer width="100%" height="80%">
+                <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={stats.byProgram} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" horizontal={true} stroke="#f0f0f0" />
                     <XAxis type="number" hide />
-                    <YAxis dataKey="programName" type="category" width={150} tick={{ fontSize: 10, fontWeight: 700 }} />
+                    <YAxis dataKey="programName" type="category" width={120} tick={{ fontSize: 10, fontWeight: 700 }} />
                     <Tooltip cursor={{ fill: '#f8f9fa' }} />
                     <Bar dataKey="count" fill={COLORS[2]} radius={[0, 10, 10, 0]} barSize={20} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-outline-variant/10 h-96">
+              <div className="bg-white p-8 rounded-3xl shadow-sm border border-outline-variant/10 min-h-[400px]">
                 <h3 className="text-sm font-black uppercase tracking-widest mb-6 text-primary">Distribución de Entrega</h3>
-                <ResponsiveContainer width="100%" height="80%">
+                <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
                     <Pie
                       data={[
