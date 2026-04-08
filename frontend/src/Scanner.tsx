@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import * as storage from './storage';
+import * as api from './api';
 
 export default function Scanner() {
   const [folioInput, setFolioInput] = useState('');
@@ -164,6 +165,8 @@ export default function Scanner() {
 
   const [capturingDocId, setCapturingDocId] = useState<string | null>(null);
   const [capturingDocName, setCapturingDocName] = useState<string | null>(null);
+  const [isValidatingOCR, setIsValidatingOCR] = useState(false);
+  const [ocrResults, setOcrResults] = useState<Record<string, any>>({});
 
   const getMissingDocs = (beneficiary: storage.Beneficiary) => {
     const programs = storage.getPrograms();
@@ -185,24 +188,41 @@ export default function Scanner() {
     setIsCapturing(true);
   };
 
-  const handleConfirmDocument = () => {
+  const handleConfirmDocument = async () => {
     if (!selectedBeneficiary || !capturedPhoto || !capturingDocId) return;
     
+    const token = storage.getToken();
+    const docId = capturingDocId;
+    const docName = capturingDocName || 'Documento';
+
+    // 1. Save locally as pending first
     const newDoc: storage.PendingDocument = {
       id: crypto.randomUUID(),
       beneficiary_folio: selectedBeneficiary.folio,
       program_id: storage.getPrograms().find(p => p.name === selectedBeneficiary.programName)?.id || 'UNKNOWN',
-      doc_type_id: capturingDocId,
-      doc_type_name: capturingDocName || 'Documento',
+      doc_type_id: docId,
+      doc_type_name: docName,
       photoData: capturedPhoto
     };
-
     storage.savePendingDocument(newDoc);
+
+    // 2. If online, try OCR validation for specific types
+    if (navigator.onLine && token && (docName.includes('INE') || docName.includes('CURP'))) {
+      setIsValidatingOCR(true);
+      try {
+        const res = await fetch(capturedPhoto);
+        const blob = await res.blob();
+        const file = new File([blob], 'ocr.jpg', { type: 'image/jpeg' });
+        const result = await api.validateDocumentOCR(token, file, selectedBeneficiary.folio);
+        setOcrResults(prev => ({ ...prev, [docId]: result }));
+      } catch (e) { console.error('OCR failed', e); }
+      finally { setIsValidatingOCR(false); }
+    }
+
     setCapturedPhoto(null);
     setIsCapturing(false);
     setCapturingDocId(null);
     setCapturingDocName(null);
-    // UI will re-render and missingDocs will update
   };
 
   return (
@@ -296,15 +316,29 @@ export default function Scanner() {
                         <p className="text-[10px] uppercase font-black tracking-widest text-[#cf5913]">Documentos Faltantes ({missingDocs.length})</p>
                         <div className="space-y-2">
                           {missingDocs.map(dt => (
-                            <button key={dt.id} onClick={() => handleDocumentCapture(dt.id, dt.name)}
-                              className="w-full bg-white border-2 border-dashed border-gray-300 rounded-xl p-3 flex items-center justify-between group hover:border-primary transition-colors text-left"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="material-symbols-outlined text-gray-400 group-hover:text-primary">upload_file</span>
-                                <span className="text-xs font-bold text-gray-600">{dt.name}</span>
+                            <div key={dt.id} className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-3 flex flex-col gap-2 group hover:border-primary transition-colors">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-gray-400 group-hover:text-primary">upload_file</span>
+                                  <span className="text-xs font-bold text-gray-600">{dt.name}</span>
+                                </div>
+                                <button onClick={() => handleDocumentCapture(dt.id, dt.name)} className="bg-primary/10 text-primary p-2 rounded-lg">
+                                  <span className="material-symbols-outlined">photo_camera</span>
+                                </button>
                               </div>
-                              <span className="material-symbols-outlined text-primary opacity-0 group-hover:opacity-100 transition-opacity">photo_camera</span>
-                            </button>
+                              {ocrResults[dt.id] && (
+                                <div className="flex gap-1">
+                                  <span className={`text-[8px] font-black px-1.5 py-0.5 rounded flex items-center gap-0.5 ${ocrResults[dt.id].matches.name ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    <span className="material-symbols-outlined text-[10px]">{ocrResults[dt.id].matches.name ? 'check' : 'warning'}</span>
+                                    NOMBRE: {ocrResults[dt.id].matches.name ? 'OK' : 'X'}
+                                  </span>
+                                  <span className={`text-[8px] font-black px-1.5 py-0.5 rounded flex items-center gap-0.5 ${ocrResults[dt.id].matches.curp ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    <span className="material-symbols-outlined text-[10px]">{ocrResults[dt.id].matches.curp ? 'check' : 'warning'}</span>
+                                    CURP: {ocrResults[dt.id].matches.curp ? 'OK' : 'X'}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -347,10 +381,14 @@ export default function Scanner() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <button onClick={takePhoto} className="w-full bg-secondary text-white py-4 rounded-xl font-bold uppercase tracking-widest flex items-center justify-center gap-2">
-                          <span className="material-symbols-outlined">camera</span> DISPARAR
+                        <button disabled={isValidatingOCR} onClick={takePhoto} className="w-full bg-secondary text-white py-4 rounded-xl font-bold uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50">
+                          {isValidatingOCR ? (
+                            <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> PROCESANDO IA...</>
+                          ) : (
+                            <><span className="material-symbols-outlined">camera</span> DISPARAR</>
+                          )}
                         </button>
-                        <button onClick={() => { setIsCapturing(false); setCapturingDocId(null); setCapturedPhoto(null); }} 
+                        <button disabled={isValidatingOCR} onClick={() => { setIsCapturing(false); setCapturingDocId(null); setCapturedPhoto(null); }} 
                           className="w-full text-xs font-bold text-outline text-center uppercase py-2">Cancelar</button>
                       </div>
                     )}

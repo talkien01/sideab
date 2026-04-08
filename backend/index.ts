@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 import * as XLSX from 'xlsx';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const app = express();
 app.use(cors());
@@ -609,6 +610,81 @@ app.get('/api/admin/beneficiaries/:folio/expediente', auth, isAdmin, (req, res) 
 
 // Serve document uploads
 app.use('/uploads/docs', express.static(DOC_UPLOAD_DIR));
+
+// ── PHASE 9: OCR VALIDATION ──────────────────────────────────────────────────
+
+// Initialize Gemini (using env variable)
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AI_KEY_PLACEHOLDER');
+const geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+// POST validate OCR
+app.post('/api/ocr/validate', auth, upload.single('photo'), async (req: any, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No se subió archivo para validación' });
+    const { folio } = req.body;
+    if (!folio) return res.status(400).json({ error: 'Folio de beneficiario requerido' });
+
+    try {
+        // 1. Get beneficiary data from DB
+        const beneficiaryPromise = new Promise((resolve, reject) => {
+            db.get(`
+                SELECT b.*, (SELECT value FROM beneficiary_custom_values WHERE beneficiary_folio = b.folio AND field_key = 'curp' LIMIT 1) as curp
+                FROM beneficiaries b WHERE b.folio = ?`, [folio], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+
+        const beneficiary = await beneficiaryPromise as any;
+        if (!beneficiary) return res.status(404).json({ error: 'Beneficiario no encontrado' });
+
+        // 2. Process with Gemini
+        const imageData = fs.readFileSync(req.file.path).toString('base64');
+        const prompt = `Analiza este documento mexicano (INE, CURP o similar). Extrae EXACTAMENTE el Nombre Completo y el CURP. 
+        Devuelve ÚNICAMENTE un objeto JSON válido con este formato: 
+        { "nombre": "NOMBRE EXTRAIDO", "curp": "CURP EXTRAIDO", "tipo_documento": "INE|CURP|OTRO" }
+        Si no encuentras el dato, deja el campo vacío. IMPORTANTE: El JSON debe ser puro, sin markdown.`;
+
+        const result = await geminiModel.generateContent([
+            prompt,
+            { inlineData: { data: imageData, mimeType: req.file.mimetype } }
+        ]);
+
+        const response = await result.response;
+        const ocrText = response.text();
+        
+        // Clean markdown backticks if any
+        const cleanedJson = ocrText.replace(/```json|```/g, '').trim();
+        let extracted;
+        try {
+            extracted = JSON.parse(cleanedJson);
+        } catch (e) {
+            console.error('JSON Parse Error from Gemini:', ocrText);
+            throw new Error('La IA devolvió un formato no válido');
+        }
+
+        // 3. Compare data
+        const valResults = {
+            folio: folio,
+            document_data: extracted,
+            db_data: {
+                fullName: beneficiary.fullName,
+                curp: beneficiary.curp || 'No registrado'
+            },
+            matches: {
+                name: extracted.nombre?.toLowerCase().includes(beneficiary.fullName.toLowerCase().split(' ')[0]) || false,
+                curp: extracted.curp?.toUpperCase().replace(/\s/g,'') === beneficiary.curp?.toUpperCase().replace(/\s/g,'')
+            }
+        };
+
+        // Cleanup temp validation file
+        fs.unlinkSync(req.file.path);
+
+        res.json(valResults);
+    } catch (error: any) {
+        console.error('OCR Error:', error);
+        res.status(500).json({ error: 'Fallo al procesar OCR con IA: ' + error.message });
+    }
+});
 
 app.listen(3001, '0.0.0.0', () => {
     console.log('SIDEAB Backend (Offline-First Sync API) running on http://0.0.0.0:3001');

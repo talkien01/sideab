@@ -196,3 +196,20 @@ export const getExpediente = async (token: string, folio: string) => {
   if (!r.ok) throw new Error('Error al obtener expediente');
   return r.json();
 };
+
+export const validateDocumentOCR = async (token: string, photo: File, folio: string) => {
+  const formData = new FormData();
+  formData.append('photo', photo);
+  formData.append('folio', folio);
+
+  const res = await fetch(`${API_URL}/ocr/validate`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+    body: formData
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Error en validación OCR');
+  }
+  return res.json();
+};
